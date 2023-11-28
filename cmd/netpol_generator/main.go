@@ -4,14 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	ciliumApiPolicy "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
-	ciliumClientSet "github.com/cilium/cilium/pkg/k8s/client/clientset/versioned"
-	slimMetaV1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
-	ciliumApiRules "github.com/cilium/cilium/pkg/policy/api"
-	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/rest"
 	"log"
 	"os"
+
+	ciliumApiPolicy "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
+	ciliumClientSet "github.com/cilium/cilium/pkg/k8s/client/clientset/versioned"
+	"github.com/cilium/cilium/pkg/policy/api"
+	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/yaml"
 )
 
@@ -57,42 +57,15 @@ func createNetPol(policyNamespace string, ciliumPolicy ciliumApiPolicy.CiliumNet
 }
 
 func main() {
-	egressRule, err := generateGithubEgressRule()
-	if err != nil {
-		return
-	}
+	var egressRule []api.EgressRule
+	var err error
 
-	ruleNamespace := "arc-runners"
-	ruleName := "ingress-egress-github"
-
-	spec := ciliumApiRules.Rule{
-		EndpointSelector: ciliumApiRules.EndpointSelector{
-			LabelSelector: &slimMetaV1.LabelSelector{},
-		},
-		Egress: egressRule,
+	for _, link := range ipRangeURL {
+		egressRule, err = generateGcpEgressRule(link)
+		if err != nil {
+			fmt.Printf("ERROR: Could not get data from %s\n", link)
+			return
+		}
 	}
-
-	ciliumPolicy := ciliumApiPolicy.CiliumNetworkPolicy{
-		TypeMeta: metaV1.TypeMeta{
-			Kind:       "CiliumNetworkPolicy",
-			APIVersion: "cilium.io/v2",
-		},
-		ObjectMeta: metaV1.ObjectMeta{
-			Name:      ruleName,
-			Namespace: ruleNamespace,
-		},
-		Spec:   &spec,
-		Specs:  nil,
-		Status: ciliumApiPolicy.CiliumNetworkPolicyStatus{},
-	}
-
-	err = writeToFile("ciliumPolicy.yaml", ciliumPolicy)
-	if err != nil {
-		panic(err)
-	}
-
-	err = createNetPol(ruleNamespace, ciliumPolicy)
-	if err != nil {
-		panic(err)
-	}
+	fmt.Println(egressRule)
 }

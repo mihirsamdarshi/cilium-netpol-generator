@@ -1,4 +1,4 @@
-module cmd/netpol_generator
+module cmd
 
 go 1.21.4
 

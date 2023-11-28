@@ -3,11 +3,16 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/cilium/cilium/pkg/policy/api"
 	"io"
 	"log"
 	"net/http"
 	"strings"
+
+	"github.com/cilium/cilium/pkg/policy/api"
+)
+
+var (
+	name = []string{}
 )
 
 const GithubMetaUrl = "https://api.github.com/meta"

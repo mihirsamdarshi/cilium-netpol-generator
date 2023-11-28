@@ -4,38 +4,28 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
+
+	"github.com/cilium/cilium/pkg/policy/api"
 )
 
 type IPRange struct {
-	Prefixes []IPPrefix `json:"prefixes"`
-}
-
-type IPPrefix struct {
-	IPv4Prefix string `json:"ipv4Prefix"`
-	IPv6Prefix string `json:"ipv6Prefix"`
-}
-
-type CIDR struct {
-	IPv4CIDR *net.IPNet
-	IPv6CIDR *net.IPNet
+	Prefixes []string `json:"prefixes"`
 }
 
 var (
-	ipRangeURL = map[string]string{
-		"goog":  "https://www.gstatic.com/ipranges/goog.json",
-		"cloud": "https://www.gstatic.com/ipranges/cloud.json",
+	ipRangeURL = []string{
+		"https://www.gstatic.com/ipranges/goog.json",
+		"https://www.gstatic.com/ipranges/cloud.json",
 	}
 )
 
-func getData(link string) (CIDR, string) {
+func generateGcpEgressRule(link string) ([]api.EgressRule, error) {
 	var ipRange IPRange
-	var creationTime string
 	resp, err := http.Get(link)
 	if err != nil {
 		fmt.Printf("ERROR: Invalid HTTP response from %s\n", link)
-		return CIDR{}, ""
+		return nil, err
 	}
 
 	defer func(Body io.ReadCloser) {
@@ -46,38 +36,47 @@ func getData(link string) (CIDR, string) {
 		}
 	}(resp.Body)
 
-	if resp.StatusCode == http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		err := json.Unmarshal(bodyBytes, &ipRange)
-		if err != nil {
-			fmt.Printf("ERROR: Could not unmarshal JSON from %s\n", link)
-			return CIDR{}, ""
+	if resp.StatusCode != http.StatusOK {
+		fmt.Printf("ERROR: Invalid HTTP response code from %s\n", link)
+		return nil, err
+	}
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	// print body bytes to string
+	bodyString := string(bodyBytes)
+	fmt.Printf("Body: %s\n", bodyString)
+	err = json.Unmarshal(bodyBytes, &ipRange)
+	if err != nil {
+		fmt.Printf("ERROR: Could not unmarshal JSON from %s\n", link)
+		return nil, err
+	}
+	// Convert the list of IP strings to a list of CIDRs (CIDR is a type alias for string)
+	cidrList := make([]api.CIDR, len(ipRange.Prefixes))
+	for i, ip := range ipRange.Prefixes {
+		cidrList[i] = api.CIDR(ip)
+	}
+
+	portList := make([]api.PortProtocol, 3)
+	for i, port := range []int{22, 80, 443} {
+		portList[i] = api.PortProtocol{
+			Port:     fmt.Sprintf("%d", port),
+			Protocol: "TCP",
 		}
-		for _, prefix := range ipRange.Prefixes {
-			_, ipnet, _ := net.ParseCIDR(prefix.IPv4Prefix)
-			_, ipnet6, _ := net.ParseCIDR(prefix.IPv6Prefix)
-
-			return CIDR{
-				IPv4CIDR: ipnet,
-				IPv6CIDR: ipnet6,
-			}, creationTime
-		}
+	}
+	portRuleList := []api.PortRule{
+		{
+			Ports: portList,
+		},
 	}
 
-	return CIDR{}, ""
-}
+	egressRule := []api.EgressRule{
+		{
+			EgressCommonRule: api.EgressCommonRule{
+				ToCIDR: cidrList,
+			},
+			ToPorts: portRuleList,
+		},
+	}
 
-func main() {
-	var cidrs = make(map[string]CIDR)
-
-	for group, link := range ipRangeURL {
-		cidrs[group], _ = getData(link)
-	}
-	if len(cidrs) != 2 {
-		fmt.Println("ERROR: Could process data from Google")
-	}
-	fmt.Println("IP ranges for Google APIs and services default domains:")
-	for ip, _ := range cidrs {
-		fmt.Println(ip)
-	}
+	return egressRule, nil
 }
